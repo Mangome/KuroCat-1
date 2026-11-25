@@ -1646,13 +1646,10 @@ private:
                 g.SetClip(&path, CombineModeIntersect);
 
                 if (pal.bodyShade.set) {
-                    Color top = col(pal.body), bottom = col(pal.bodyShade);
-                    LinearGradientBrush bodyGrad(PointF(seatX, headCenter.y - 54.0f), PointF(seatX, seatY + 38.0f), top, bottom);
-                    bodyGrad.SetWrapMode(WrapModeTileFlipXY);
-                    Color bodyCols[4] = { top, top, bottom, bottom };
-                    REAL bodyPos[4] = { 0.0f, 0.22f, 0.80f, 1.0f };
-                    bodyGrad.SetInterpolationColors(bodyCols, bodyPos, 4);
-                    g.FillPath(&bodyGrad, &path);
+                    // Same fade as macOS/linux: body -> bodyShade over the torso, clamping past both ends.
+                    Color cols[2] = { col(pal.body), col(pal.bodyShade) };
+                    REAL locs[2] = { 0.15f, 1.0f };
+                    fillClampedLinearGradient(g, &path, nullptr, PointF(seatX, headCenter.y - 34.0f), PointF(seatX, seatY + 18.0f), cols, locs, 2);
                 }
 
                 if (auto bg = skin.partGradients.find("body"); bg != skin.partGradients.end()) {
