@@ -83,6 +83,14 @@ int main() {
     CHECK(light.palette.hindLeg.set && light.palette.hindPaw.set, "hindLeg / hindPaw palette colours");
     CHECK(light.marks.size() == 2 && light.marks[1].space == SkinSpace::HindLeg, "hindLeg mark parsed and unknown future space skipped");
     CHECK(light.marks[0].color.r == 0xA5 / 255.0 && light.marks[0].color.a == 0.5, "mark colour defaults to stripes, alpha multiplied");
+    SkinSpec brush = accepts(R"({"formatVersion":1,"name":"x","palette":{"body":"#9A6E51"},
+        "marks":[{"space":"body","kind":"stroke","color":"#9A6E51","width":19.4,"brush":"airbrush","softness":0.85,"points":[[0,0],[10,10]]},
+                 {"space":"head","kind":"stroke","color":"#000000","brush":"smudge","softness":5,"points":[[0,0],[1,1]]},
+                 {"space":"body","kind":"stroke","color":"#FFFFFF","brush":"crayon","points":[[0,0],[1,1]]},
+                 {"space":"body","kind":"stroke","color":"#FFFFFF","points":[[0,0],[1,1]]}]})");
+    CHECK(brush.marks[0].brush == SkinBrush::Airbrush && std::fabs(brush.marks[0].softness - 0.85f) < 1e-4f, "mark brush airbrush + softness");
+    CHECK(brush.marks[1].brush == SkinBrush::Smudge && brush.marks[1].softness == 1.0f, "mark softness clamped to 1, smudge parsed");
+    CHECK(brush.marks[2].brush == SkinBrush::Round && brush.marks[3].brush == SkinBrush::Round && brush.marks[3].softness == 0.65f, "unknown brush and missing brush both fall back to round");
     SkinSpec alpha = accepts(R"({"formatVersion":1,"name":"x","palette":{"body":"#000000"},
         "regions":[{"space":"leftEar","fill":"#FFFFFF80","alpha":0.5,"anchors":[{"x":-60,"y":0},{"x":60,"y":0},{"x":0,"y":-120,"inX":40,"inY":-120}]}]})");
     CHECK(std::fabs(alpha.regions[0].fill.a - (128 / 255.0) * 0.5) < 1e-6 && alpha.regions[0].anchors[2].outX == 0, "region alpha + missing handles = corner");
