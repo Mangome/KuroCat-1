@@ -1440,30 +1440,54 @@ bool promptRenameSkin(AppState& app, const std::string& id) {
     RenameDialogState st;
     st.value = utf8ToWide(s->name);
 
-    int w = 360, h = 150;
+    // Layout is authored in 96-dpi design units and scaled by the system DPI. A fixed 360x150 window
+    // left less client height than the caption + button row need at 125/150/200 % scaling, so the
+    // Save/Cancel row was clipped by the bottom edge (app.manifest is PerMonitorV2).
+    HDC screenDc = GetDC(nullptr);
+    float scale = GetDeviceCaps(screenDc, LOGPIXELSY) / 96.0f;
+    ReleaseDC(nullptr, screenDc);
+    auto px = [scale](int v) { return (int)std::lround(v * scale); };
+    const int clientW = px(360), clientH = px(124);   // label + edit + button row + bottom margin
+    const DWORD dlgStyle = WS_POPUP | WS_CAPTION | WS_SYSMENU;
+    const DWORD dlgExStyle = WS_EX_TOPMOST | WS_EX_DLGMODALFRAME;
+    RECT frame = {0, 0, clientW, clientH};
+    AdjustWindowRectEx(&frame, dlgStyle, FALSE, dlgExStyle);   // rough size; corrected below
+    int w = frame.right - frame.left, h = frame.bottom - frame.top;
     int sx = (GetSystemMetrics(SM_CXSCREEN) - w) / 2;
     int sy = (GetSystemMetrics(SM_CYSCREEN) - h) / 2;
     HWND dlg = CreateWindowExW(
-        WS_EX_TOPMOST | WS_EX_DLGMODALFRAME,
+        dlgExStyle,
         clsName,
         en ? L"Rename Skin" : L"重命名皮肤",
-        WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_VISIBLE,
+        dlgStyle,
         sx, sy, w, h,
         app.settingsWnd ? app.settingsWnd : app.menuOwnerHwnd,
         nullptr, inst, &st
     );
     if (!dlg) return false;
+    {
+        // AdjustWindowRectEx ignores the monitor DPI, so the caption + frame can be taller than it
+        // assumed and eat the client area. Measure what we actually got and grow to fit.
+        RECT cr = {}, wr = {};
+        GetClientRect(dlg, &cr);
+        GetWindowRect(dlg, &wr);
+        int addW = std::max(0, clientW - (int)cr.right), addH = std::max(0, clientH - (int)cr.bottom);
+        int ww = (wr.right - wr.left) + addW, wh = (wr.bottom - wr.top) + addH;
+        SetWindowPos(dlg, nullptr, (GetSystemMetrics(SM_CXSCREEN) - ww) / 2, (GetSystemMetrics(SM_CYSCREEN) - wh) / 2,
+                     ww, wh, SWP_NOZORDER | SWP_NOACTIVATE);
+        ShowWindow(dlg, SW_SHOWNORMAL);
+    }
 
     HFONT font = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
     HWND lbl = CreateWindowExW(0, L"STATIC",
         en ? L"Enter a new skin name (max 40 chars):" : L"请输入新的皮肤名称（最多 40 字）：",
-        WS_CHILD | WS_VISIBLE, 18, 16, 316, 20, dlg, nullptr, inst, nullptr);
+        WS_CHILD | WS_VISIBLE, px(18), px(16), px(316), px(20), dlg, nullptr, inst, nullptr);
     st.editHwnd = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", st.value.c_str(),
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL, 18, 42, 316, 24, dlg, (HMENU)1001, inst, nullptr);
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_AUTOHSCROLL, px(18), px(42), px(316), px(26), dlg, (HMENU)1001, inst, nullptr);
     HWND okBtn = CreateWindowExW(0, L"BUTTON", en ? L"Save" : L"保存",
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON, 174, 80, 76, 26, dlg, (HMENU)IDOK, inst, nullptr);
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_DEFPUSHBUTTON, px(174), px(80), px(76), px(26), dlg, (HMENU)IDOK, inst, nullptr);
     HWND cancelBtn = CreateWindowExW(0, L"BUTTON", en ? L"Cancel" : L"取消",
-        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, 258, 80, 76, 26, dlg, (HMENU)IDCANCEL, inst, nullptr);
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_PUSHBUTTON, px(258), px(80), px(76), px(26), dlg, (HMENU)IDCANCEL, inst, nullptr);
     for (HWND c : {lbl, st.editHwnd, okBtn, cancelBtn}) SendMessageW(c, WM_SETFONT, (WPARAM)font, TRUE);
     SendMessageW(st.editHwnd, EM_SETLIMITTEXT, 40, 0);
     SendMessageW(st.editHwnd, EM_SETSEL, 0, -1);
