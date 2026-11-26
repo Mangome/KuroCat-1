@@ -614,6 +614,77 @@ private:
         return out;
     }
     // Strokes get round caps, except tail-space strokes (bands around the tail) which are cut flat.
+    /// Alpha of a skin colour scaled by `mul` (the workshop's rgbaToCss(c, alphaMul) multiplies too).
+    static Gdiplus::Color scaledAlpha(const SkinColor& c, double mul) {
+        return Gdiplus::Color((BYTE)std::lround(std::clamp(c.a * mul, 0.0, 1.0) * 255.0), byteOf(c.r), byteOf(c.g), byteOf(c.b));
+    }
+
+    /// Workshop `airbrush`: stamp a soft radial dab every ~1/3 brush radius along the stroke.
+    template <class Pts>
+    static void drawAirbrushMark(Gdiplus::Graphics& g, const Pts& pts, const SkinMark& mark) {
+        using namespace Gdiplus;
+        if (pts.empty()) return;
+        const float radius = std::max(2.2f, mark.width * 1.15f);
+        const float step = std::max(1.4f, radius * 0.34f);
+        const Color core = scaledAlpha(mark.color, 0.34);
+        const Color edge = withAlpha(mark.color, 0);
+        auto stamp = [&](float x, float y) {
+            GraphicsPath disc;
+            disc.AddEllipse(x - radius, y - radius, radius * 2.0f, radius * 2.0f);
+            PathGradientBrush pgb(&disc);
+            // Linear center->rim fade: mathematically the same as the workshop's 3-stop radial
+            // gradient (its mid stop sits exactly on the line from 0.34 down to 0), and cheaper.
+            INT surroundCount = 1;
+            pgb.SetCenterColor(core);
+            pgb.SetSurroundColors(&edge, &surroundCount);
+            g.FillPath(&pgb, &disc);
+        };
+        stamp(pts[0].X, pts[0].Y);
+        float carry = 0.0f;
+        for (size_t i = 1; i < pts.size(); ++i) {
+            float dx = pts[i].X - pts[i - 1].X, dy = pts[i].Y - pts[i - 1].Y;
+            float seg = std::hypot(dx, dy);
+            if (seg < 0.001f) continue;
+            float d = step - carry;
+            while (d <= seg) {
+                float t = d / seg;
+                stamp(pts[i - 1].X + dx * t, pts[i - 1].Y + dy * t);
+                d += step;
+            }
+            carry = seg - (d - step);
+        }
+    }
+
+    /// Workshop `soft` / `smudge`: four concentric round-capped strokes fading outward.
+    template <class Pts>
+    static void drawSoftMark(Gdiplus::Graphics& g, const Pts& pts, const SkinMark& mark) {
+        using namespace Gdiplus;
+        if (pts.size() < 2) return;
+        const float soft = std::clamp(mark.softness, 0.0f, 1.0f);
+        struct Pass { float mul, alpha; };
+        Pass passes[4];
+        if (mark.brush == SkinBrush::Smudge) {
+            passes[0] = {1.0f + soft * 1.25f, 0.12f};
+            passes[1] = {1.0f + soft * 0.72f, 0.18f};
+            passes[2] = {1.0f + soft * 0.25f, 0.28f};
+            passes[3] = {0.68f, 0.42f};
+        } else {
+            passes[0] = {1.0f + soft * 1.15f, 0.14f};
+            passes[1] = {1.0f + soft * 0.65f, 0.24f};
+            passes[2] = {1.0f + soft * 0.22f, 0.38f};
+            passes[3] = {0.72f, 0.62f};
+        }
+        GraphicsPath path;
+        path.AddLines(&pts[0], (INT)pts.size());
+        for (const Pass& p : passes) {
+            Pen pen(scaledAlpha(mark.color, p.alpha), std::max(0.6f, mark.width * p.mul));
+            pen.SetStartCap(LineCapRound);
+            pen.SetEndCap(LineCapRound);
+            pen.SetLineJoin(LineJoinRound);
+            g.DrawPath(&pen, &path);
+        }
+    }
+
     template <class Map>
     static void drawMark(Gdiplus::Graphics& g, const SkinMark& mark, Map map, bool roundCaps = true) {
         using namespace Gdiplus;
@@ -621,6 +692,8 @@ private:
         GraphicsPath path;
         Color color = col(mark.color);
         if (!mark.stroke) { path.AddPolygon(points.data(), (INT)points.size()); SolidBrush brush(color); g.FillPath(&brush, &path); }
+        else if (mark.brush == SkinBrush::Airbrush) drawAirbrushMark(g, points, mark);
+        else if (mark.brush == SkinBrush::Soft || mark.brush == SkinBrush::Smudge) drawSoftMark(g, points, mark);
         else if (!roundCaps) {
             Pen pen(color, mark.width);
             if (points.size() == 2) g.DrawLine(&pen, points[0].X, points[0].Y, points[1].X, points[1].Y);
@@ -1654,13 +1727,10 @@ private:
                 g.SetClip(&path, CombineModeIntersect);
 
                 if (pal.bodyShade.set) {
-                    Color top = col(pal.body), bottom = col(pal.bodyShade);
-                    LinearGradientBrush bodyGrad(PointF(seatX, headCenter.y - 54.0f), PointF(seatX, seatY + 38.0f), top, bottom);
-                    bodyGrad.SetWrapMode(WrapModeTileFlipXY);
-                    Color bodyCols[4] = { top, top, bottom, bottom };
-                    REAL bodyPos[4] = { 0.0f, 0.22f, 0.80f, 1.0f };
-                    bodyGrad.SetInterpolationColors(bodyCols, bodyPos, 4);
-                    g.FillPath(&bodyGrad, &path);
+                    // Same fade as macOS/linux: body -> bodyShade over the torso, clamping past both ends.
+                    Color cols[2] = { col(pal.body), col(pal.bodyShade) };
+                    REAL locs[2] = { 0.15f, 1.0f };
+                    fillClampedLinearGradient(g, &path, nullptr, PointF(seatX, headCenter.y - 34.0f), PointF(seatX, seatY + 18.0f), cols, locs, 2);
                 }
 
                 if (auto bg = skin.partGradients.find("body"); bg != skin.partGradients.end()) {

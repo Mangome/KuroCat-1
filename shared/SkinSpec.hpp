@@ -31,6 +31,8 @@ enum class SkinHeadSurface : int { Dome = 0, Plane };
 enum class SkinAnchorPoint : int { HeadTop = 0, Face, Neck, TailTip };
 enum class SkinRenderStyle : int { Standard = 0, Douni, Dazed };
 enum class SkinTypingStyle : int { Standard = 0, Douni };
+// `marks[].brush` (workshop brush tool). Round is the classic hard round-cap stroke.
+enum class SkinBrush : int { Round = 0, Soft, Airbrush, Smudge };
 
 struct SkinPoint { float x = 0, y = 0; };
 // One pen-tool anchor; in/out are absolute handle positions in the same part space.
@@ -51,6 +53,10 @@ struct SkinMark {
     SkinColor color;
     std::vector<SkinPoint> points;
     bool clipToBib = false;
+    // Workshop soft brushes: `soft` / `smudge` stroke the path in 4 fading passes, `airbrush` stamps
+    // radial dabs along it. Unknown brushes parse as Round so old skins keep hard round caps.
+    SkinBrush brush = SkinBrush::Round;
+    float softness = 0.65f; // 0..1, same default as the workshop
 };
 
 struct SkinShape {
@@ -615,6 +621,15 @@ inline bool SkinSpec::parse(const std::string& bytes, SkinSpec& out, std::string
             mark.color.a *= alpha;
             mark.width = mark.stroke ? 2.0f : 0.0f;
             if (mark.stroke && !number(c, m.get("width"), f + ".width", 0.2, 24, mark.width)) { error = c.error; return false; }
+            if (const Value* brush = m.get("brush")) {
+                if (brush->type == Value::JString) {
+                    if (brush->s == "soft") mark.brush = SkinBrush::Soft;
+                    else if (brush->s == "airbrush") mark.brush = SkinBrush::Airbrush;
+                    else if (brush->s == "smudge") mark.brush = SkinBrush::Smudge;
+                    // unknown brush names fall back to Round, matching the workshop's normalizer
+                }
+            }
+            if (!number(c, m.get("softness"), f + ".softness", 0, 1, mark.softness)) { error = c.error; return false; }
             const Value* pts = m.get("points");
             if (!pts || pts->type != Value::JArray) { error = f + ".points 必须是 [[x, y], …] 数组"; return false; }
             size_t minPts = mark.stroke ? 2 : 3;

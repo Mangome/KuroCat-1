@@ -1910,6 +1910,12 @@ enum CatRenderer {
     /// Strokes get round caps, except tail-space strokes (bands around the tail) which are cut flat.
     private static func drawMark(in ctx: CGContext, _ mark: SkinMark, cap: CGLineCap = .round, map: (CGPoint) -> CGPoint) {
         ctx.saveGState()
+        if mark.stroke, mark.brush != .round {
+            if mark.brush == .airbrush { drawAirbrushMark(in: ctx, mark, map: map) }
+            else { drawSoftMark(in: ctx, mark, map: map) }
+            ctx.restoreGState()
+            return
+        }
         let path = polyline(mark.points, closed: !mark.stroke, map: map)
         let color = mark.color.ns
         if !mark.stroke {
@@ -1919,6 +1925,56 @@ enum CatRenderer {
             ctx.setLineCap(cap); ctx.setLineJoin(.round); ctx.addPath(path); ctx.strokePath()
         }
         ctx.restoreGState()
+    }
+    /// Workshop `airbrush`: a soft radial dab every ~1/3 brush radius along the stroke.
+    private static func drawAirbrushMark(in ctx: CGContext, _ mark: SkinMark, map: (CGPoint) -> CGPoint) {
+        guard !mark.points.isEmpty else { return }
+        let radius = max(2.2, mark.width * 1.15)
+        let step = max(1.4, radius * 0.34)
+        // Linear centre -> rim fade: the same curve as the workshop's radial gradient (its mid stop
+        // sits on the line from 0.34 down to 0).
+        let colors = [mark.color.withAlpha(mark.color.a * 0.34).cgColor,
+                      mark.color.withAlpha(0).cgColor] as CFArray
+        guard let grad = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors, locations: [0, 1]) else { return }
+        let pts = mark.points.map(map)
+        func stamp(_ p: CGPoint) {
+            ctx.saveGState()
+            ctx.addArc(center: p, radius: radius, startAngle: 0, endAngle: .pi * 2, clockwise: false)
+            ctx.clip()
+            ctx.drawRadialGradient(grad, startCenter: p, startRadius: 0, endCenter: p, endRadius: radius, options: [])
+            ctx.restoreGState()
+        }
+        stamp(pts[0])
+        var carry: CGFloat = 0
+        for i in 1..<pts.count {
+            let dx = pts[i].x - pts[i - 1].x, dy = pts[i].y - pts[i - 1].y
+            let seg = hypot(dx, dy)
+            if seg < 0.001 { continue }
+            var d = step - carry
+            while d <= seg {
+                let t = d / seg
+                stamp(CGPoint(x: pts[i - 1].x + dx * t, y: pts[i - 1].y + dy * t))
+                d += step
+            }
+            carry = seg - (d - step)
+        }
+    }
+    /// Workshop `soft` / `smudge`: four concentric round-capped strokes fading outward.
+    private static func drawSoftMark(in ctx: CGContext, _ mark: SkinMark, map: (CGPoint) -> CGPoint) {
+        guard mark.points.count >= 2 else { return }
+        let soft = max(0, min(1, mark.softness))
+        let passes: [(mul: CGFloat, alpha: CGFloat)] = mark.brush == .smudge
+            ? [(1 + soft * 1.25, 0.12), (1 + soft * 0.72, 0.18), (1 + soft * 0.25, 0.28), (0.68, 0.42)]
+            : [(1 + soft * 1.15, 0.14), (1 + soft * 0.65, 0.24), (1 + soft * 0.22, 0.38), (0.72, 0.62)]
+        let path = polyline(mark.points, closed: false, map: map)
+        ctx.setLineCap(.round)
+        ctx.setLineJoin(.round)
+        for pass in passes {
+            ctx.addPath(path)
+            ctx.setStrokeColor(mark.color.withAlpha(mark.color.a * pass.alpha).cgColor)
+            ctx.setLineWidth(max(0.6, mark.width * pass.mul))
+            ctx.strokePath()
+        }
     }
     private static func drawRegion(in ctx: CGContext, _ region: SkinRegion, map: (CGPoint) -> CGPoint) {
         ctx.setFillColor(region.fill.ns.cgColor)

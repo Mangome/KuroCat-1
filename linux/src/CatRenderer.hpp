@@ -587,13 +587,88 @@ private:
             if (first) { cairo_move_to(cr, p.x, p.y); first = false; } else cairo_line_to(cr, p.x, p.y);
         }
     }
+    // Workshop `airbrush`: a soft radial dab every ~1/3 brush radius along the stroke.
+    template <class Map>
+    static void drawAirbrushMark(cairo_t* cr, const SkinMark& mark, Map map) {
+        if (mark.points.empty()) return;
+        const double radius = std::max(2.2, (double)mark.width * 1.15);
+        const double step = std::max(1.4, radius * 0.34);
+        const size_t count = mark.points.size();
+        std::vector<double> xs(count), ys(count);
+        for (size_t i = 0; i < count; ++i) { auto q = map(mark.points[i]); xs[i] = q.x; ys[i] = q.y; }
+        // Linear centre -> rim fade: the same curve as the workshop's radial gradient (its mid stop
+        // sits on the line from 0.34 down to 0).
+        auto stamp = [&](double x, double y) {
+            cairo_pattern_t* pat = cairo_pattern_create_radial(x, y, 0.0, x, y, radius);
+            cairo_pattern_add_color_stop_rgba(pat, 0.0, mark.color.r, mark.color.g, mark.color.b, mark.color.a * 0.34);
+            cairo_pattern_add_color_stop_rgba(pat, 1.0, mark.color.r, mark.color.g, mark.color.b, 0.0);
+            cairo_new_path(cr);
+            cairo_arc(cr, x, y, radius, 0.0, 2.0 * 3.14159265358979323846);
+            cairo_set_source(cr, pat);
+            cairo_fill(cr);
+            cairo_pattern_destroy(pat);
+        };
+        stamp(xs[0], ys[0]);
+        double carry = 0.0;
+        for (size_t i = 1; i < count; ++i) {
+            double dx = xs[i] - xs[i - 1], dy = ys[i] - ys[i - 1];
+            double seg = std::hypot(dx, dy);
+            if (seg < 0.001) continue;
+            double d = step - carry;
+            while (d <= seg) {
+                double t = d / seg;
+                stamp(xs[i - 1] + dx * t, ys[i - 1] + dy * t);
+                d += step;
+            }
+            carry = seg - (d - step);
+        }
+    }
+    // Workshop `soft` / `smudge`: four concentric round-capped strokes fading outward.
+    template <class Map>
+    static void drawSoftMark(cairo_t* cr, const SkinMark& mark, Map map) {
+        if (mark.points.size() < 2) return;
+        const double soft = std::clamp((double)mark.softness, 0.0, 1.0);
+        struct Pass { double mul, alpha; };
+        Pass passes[4];
+        if (mark.brush == SkinBrush::Smudge) {
+            passes[0] = {1.0 + soft * 1.25, 0.12};
+            passes[1] = {1.0 + soft * 0.72, 0.18};
+            passes[2] = {1.0 + soft * 0.25, 0.28};
+            passes[3] = {0.68, 0.42};
+        } else {
+            passes[0] = {1.0 + soft * 1.15, 0.14};
+            passes[1] = {1.0 + soft * 0.65, 0.24};
+            passes[2] = {1.0 + soft * 0.22, 0.38};
+            passes[3] = {0.72, 0.62};
+        }
+        tracePolyline(cr, mark.points, map);
+        cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
+        cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+        for (const Pass& p : passes) {
+            cairo_set_line_width(cr, std::max(0.6, (double)mark.width * p.mul));
+            setCol(cr, mark.color, p.alpha);
+            cairo_stroke_preserve(cr);
+        }
+        cairo_new_path(cr);
+    }
     // Strokes get round caps, except tail-space strokes (bands around the tail) which are cut flat.
     template <class Map>
     static void drawMark(cairo_t* cr, const SkinMark& mark, Map map, cairo_line_cap_t cap = CAIRO_LINE_CAP_ROUND) {
+        if (!mark.stroke) {
+            tracePolyline(cr, mark.points, map);
+            setCol(cr, mark.color);
+            cairo_close_path(cr);
+            cairo_fill(cr);
+            return;
+        }
+        if (mark.brush == SkinBrush::Airbrush) { drawAirbrushMark(cr, mark, map); return; }
+        if (mark.brush == SkinBrush::Soft || mark.brush == SkinBrush::Smudge) { drawSoftMark(cr, mark, map); return; }
         tracePolyline(cr, mark.points, map);
         setCol(cr, mark.color);
-        if (!mark.stroke) { cairo_close_path(cr); cairo_fill(cr); }
-        else { cairo_set_line_width(cr,mark.width);cairo_set_line_cap(cr,cap);cairo_set_line_join(cr,CAIRO_LINE_JOIN_ROUND);cairo_stroke(cr); }
+        cairo_set_line_width(cr, mark.width);
+        cairo_set_line_cap(cr, cap);
+        cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
+        cairo_stroke(cr);
     }
     template <class Map>
     static void drawRegion(cairo_t* cr, const SkinRegion& region, Map map) {

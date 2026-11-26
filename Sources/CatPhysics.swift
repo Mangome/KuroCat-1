@@ -1512,6 +1512,8 @@ struct SkinColor: Hashable {
 
 /// Part coordinate spaces (see docs/skin-format.md for the diagram).
 enum SkinSpace: String { case head, skull, body, tail, leftEar, rightEar, leftArm, rightArm, hindLeg }
+/// `marks[].brush` (workshop brush tool). `.round` is the classic hard round-cap stroke.
+enum SkinBrush: String { case round, soft, airbrush, smudge }
 enum SkinBuild: String { case standard, sleek }
 enum SkinHeadSurface: String { case dome, plane }
 enum SkinAnchorPoint: String { case headTop, face, neck, tailTip }
@@ -1535,6 +1537,10 @@ struct SkinMark {
     var color: SkinColor
     var points: [CGPoint]
     var clipToBib: Bool = false
+    /// Workshop soft brushes: `.soft` / `.smudge` stroke the path in four fading passes, `.airbrush`
+    /// stamps radial dabs along it. Unknown brush names parse as `.round`.
+    var brush: SkinBrush = .round
+    var softness: CGFloat = 0.65
 }
 
 struct SkinShape: Hashable {
@@ -1915,7 +1921,10 @@ struct SkinSpec {
                     pts.append(CGPoint(x: min(400, max(-400, x)), y: min(400, max(-400, y))))
                 }
                 let clipToBib = (m["clipToBib"] as? Bool) == true
-                spec.marks.append(SkinMark(space: sp, stroke: stroke, width: width, color: c, points: pts, clipToBib: clipToBib))
+                let brush = SkinBrush(rawValue: (m["brush"] as? String) ?? "") ?? .round
+                let softness = try number(m["softness"], "\(f).softness", 0, 1, 0.65)
+                spec.marks.append(SkinMark(space: sp, stroke: stroke, width: width, color: c, points: pts,
+                                           clipToBib: clipToBib, brush: brush, softness: softness))
             }
         }
 
