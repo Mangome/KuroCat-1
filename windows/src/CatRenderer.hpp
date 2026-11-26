@@ -6114,10 +6114,15 @@ private:
                         }
                     }
                     if (!isDazed && pal.tailTip.set) {
-                        Pen tipPen(col(pal.tailTip), tailW * 0.92f);
+                        // Tail tip = last 22% of the tail curve (de Casteljau split at t = 0.78, same as drawTail's
+                        // idle tip). A straight chord only touches the curve at the tip and cuts across the bend, so the
+                        // colour ended up outside the silhouette on the convex side and left fur showing on the inside.
+                        const float tipT = 0.78f;
+                        Pt ta = lerpPt(tailRoot, tailC1, tipT), tb = lerpPt(tailC1, tailC2, tipT), tq = lerpPt(tailC2, tailTip, tipT);
+                        Pt td = lerpPt(ta, tb, tipT), te = lerpPt(tb, tq, tipT), ts = lerpPt(td, te, tipT);
+                        Pen tipPen(col(pal.tailTip), tailW);
                         setRound(tipPen);
-                        Pt tStart = lerpPt(tailC2, tailTip, 0.35f);
-                        lg.DrawLine(&tipPen, tStart.x, tStart.y, tailTip.x, tailTip.y);
+                        lg.DrawBezier(&tipPen, PointF(ts.x, ts.y), PointF(te.x, te.y), PointF(tq.x, tq.y), PointF(tailTip.x, tailTip.y));
                     }
                     if (!isBlackRim && !pal.outline.set) {
                         GraphicsPath strokedTail;

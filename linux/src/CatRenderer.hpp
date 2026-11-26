@@ -4551,12 +4551,17 @@ public:
             cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
         }
         if (!isDazed && pal.tailTip.set) {
+            // Tail tip = last 22% of the tail curve (de Casteljau split at t = 0.78, same as the idle tail tip).
+            // A straight chord only touches the curve at the tip and cuts across the bend, so the colour ended up
+            // outside the silhouette on the convex side and left fur showing on the inside.
+            const double tipT = 0.78;
+            PtD ta = lerpPtD(tailRoot, tailC1, tipT), tb = lerpPtD(tailC1, tailC2, tipT), tq = lerpPtD(tailC2, tailTip, tipT);
+            PtD td = lerpPtD(ta, tb, tipT), te = lerpPtD(tb, tq, tipT), ts = lerpPtD(td, te, tipT);
             setCol(cr, pal.tailTip);
-            cairo_set_line_width(cr, tailW * 0.92);
-            PtD tipStart = lerpPtD(tailC2, tailTip, 0.35);
+            cairo_set_line_width(cr, tailW);
             cairo_new_path(cr);
-            cairo_move_to(cr, tipStart.x, tipStart.y);
-            cairo_line_to(cr, tailTip.x, tailTip.y);
+            cairo_move_to(cr, ts.x, ts.y);
+            cairo_curve_to(cr, te.x, te.y, tq.x, tq.y, tailTip.x, tailTip.y);
             cairo_stroke(cr);
         }
         cairo_restore(cr);

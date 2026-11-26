@@ -7713,10 +7713,16 @@ enum CatRenderer {
             ctx.setLineCap(.round)
         }
         if !isDazed, let tipColor = pal.tailTip {
+            // Tail tip = last 22% of the tail curve (de Casteljau split at t = 0.78, same as the idle tail tip).
+            // A straight chord only touches the curve at the tip and cuts across the bend, so the colour ended up
+            // outside the silhouette on the convex side and left fur showing on the inside.
+            let tipT: CGFloat = 0.78
+            let ta = lerpPt(tailPivot, tailC1, tipT), tb = lerpPt(tailC1, tailC2, tipT), tq = lerpPt(tailC2, tailTip, tipT)
+            let td = lerpPt(ta, tb, tipT), te = lerpPt(tb, tq, tipT)
             ctx.setStrokeColor(tipColor.ns.cgColor)
-            ctx.setLineWidth(tailW * 0.92)
-            ctx.move(to: lerpPt(tailC2, tailTip, 0.35))
-            ctx.addLine(to: tailTip)
+            ctx.setLineWidth(tailW)
+            ctx.move(to: lerpPt(td, te, tipT))
+            ctx.addCurve(to: tailTip, control1: te, control2: tq)
             ctx.strokePath()
         }
         if !isBlackRim && pal.outline == nil {

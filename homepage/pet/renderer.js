@@ -4637,12 +4637,17 @@
       ctx.lineCap = 'round';
     }
     if (!isDazed && pal.tailTip) {
-      const tipStart = lerpPt(tailC2, tailTip, 0.35);
+      // Tail tip = last 22% of the tail curve (de Casteljau split at t = 0.78, same as the idle tail tip).
+      // A straight chord only touches the curve at the tip and cuts across the bend, so the colour ended up
+      // outside the silhouette on the convex side and left fur showing on the inside.
+      const tipT = 0.78;
+      const ta = lerpPt(tailPivot, tailC1, tipT), tb = lerpPt(tailC1, tailC2, tipT), tq = lerpPt(tailC2, tailTip, tipT);
+      const td = lerpPt(ta, tb, tipT), te = lerpPt(tb, tq, tipT), ts = lerpPt(td, te, tipT);
       ctx.strokeStyle = rgbaToCss(pal.tailTip);
-      ctx.lineWidth = tailW * 0.92;
+      ctx.lineWidth = tailW;
       ctx.beginPath();
-      ctx.moveTo(tipStart.x, tipStart.y);
-      ctx.lineTo(tailTip.x, tailTip.y);
+      ctx.moveTo(ts.x, ts.y);
+      ctx.bezierCurveTo(te.x, te.y, tq.x, tq.y, tailTip.x, tailTip.y);
       ctx.stroke();
     }
     ctx.restore();
